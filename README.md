@@ -1,174 +1,56 @@
 # vulndiff
 
-**Diff-aware security scanner for teams using AI coding assistants.**
+**Catch AI-introduced vulnerabilities before they reach production.**
 
-vulndiff analyzes staged or committed code changes against a curated set of
-vulnerability patterns covering OWASP Top 10, injection flaws, authentication
-issues, hardcoded secrets, path traversal, and unsafe deserialization. By
-operating directly on git diffs rather than entire codebases, it gives fast,
-focused security feedback precisely where new code was introduced.
-
-> **Catch AI-introduced vulnerabilities before they reach production.**
-
----
-
-## Features
-
-- **Diff-aware scanning** — Only analyzes lines *added* in the diff, eliminating
-  noise from pre-existing code and giving precise, line-level findings.
-- **Comprehensive rule set** — Covers OWASP Top 10 categories including
-  SQL/command/LDAP injection, hardcoded secrets, insecure auth patterns,
-  path traversal, and unsafe deserialization.
-- **Multiple output formats** — Rich colorized terminal report, structured JSON
-  for CI pipelines, and SARIF for GitHub Advanced Security / VS Code.
-- **Flexible input modes** — Staged changes (pre-commit), HEAD vs branch, or
-  arbitrary git ref ranges for CI use.
-- **Zero heavy dependencies** — Only requires Python stdlib plus `rich` for
-  terminal output.
-
----
-
-## Installation
-
-### Using pip
-
-```bash
-pip install vulndiff
-```
-
-### Using pipx (recommended for CLI tools)
-
-```bash
-pipx install vulndiff
-```
-
-### From source
-
-```bash
-git clone https://github.com/example/vulndiff.git
-cd vulndiff
-pip install -e .
-```
+vulndiff is a diff-aware security scanner built for teams using AI coding assistants like GitHub Copilot or Cursor. Instead of scanning your entire codebase, it analyzes only the lines you've added — giving you fast, focused security feedback precisely where new code was introduced. It covers OWASP Top 10, injection flaws, hardcoded secrets, insecure auth patterns, and more.
 
 ---
 
 ## Quick Start
 
-### Scan staged changes (pre-commit style)
+**Install:**
 
 ```bash
-# Stage your changes first
-git add .
+pip install vulndiff
+```
 
-# Run vulndiff on staged diff
+**Scan your staged changes before committing:**
+
+```bash
 vulndiff --staged
 ```
 
-### Scan the last commit
+**Scan the most recent commit:**
 
 ```bash
 vulndiff --head
 ```
 
-### Scan a range of commits
+**Scan a branch range (CI):**
 
 ```bash
-vulndiff --from-ref main --to-ref feature/my-branch
+vulndiff --from-ref main --to-ref HEAD
 ```
 
-### Use a specific output format
-
-```bash
-# JSON output (for CI pipelines)
-vulndiff --staged --format json
-
-# SARIF output (for GitHub Advanced Security)
-vulndiff --staged --format sarif > results.sarif
-
-# Rich terminal output (default)
-vulndiff --staged --format rich
-```
-
-### Filter by severity
-
-```bash
-# Only show findings of medium severity or higher
-vulndiff --staged --severity medium
-
-# Only show critical and high findings, fail CI on any match
-vulndiff --staged --severity high --fail-on-findings
-```
+If findings are detected, vulndiff exits with code `1` so it can block CI pipelines or pre-commit hooks automatically.
 
 ---
 
-## CLI Reference
+## Features
 
-```
-usage: vulndiff [-h] [--staged | --head | --from-ref REF --to-ref REF]
-                [--format {rich,json,sarif}]
-                [--severity {info,low,medium,high,critical}]
-                [--fail-on-findings]
-                [--no-color]
-                [--version]
-
-Diff-aware security scanner for AI-assisted codebases.
-
-input mode (choose one):
-  --staged              Scan staged changes (git diff --cached)
-  --head                Scan changes in the last commit (HEAD~1..HEAD)
-  --from-ref REF        Start git ref for range scan
-  --to-ref REF          End git ref for range scan (default: HEAD)
-
-output options:
-  --format {rich,json,sarif}
-                        Output format (default: rich)
-  --no-color            Disable color in terminal output
-
-filtering:
-  --severity {info,low,medium,high,critical}
-                        Minimum severity level to report (default: low)
-
-CI / exit code:
-  --fail-on-findings    Exit with code 1 if any findings are reported
-                        (after severity filtering). Default behavior.
-  --no-fail             Always exit with code 0 (useful for advisory mode)
-
-other:
-  -h, --help            Show this help message and exit
-  --version             Show program version and exit
-```
+- **Diff-aware scanning** — Only analyzes lines *added* in the diff, eliminating noise from pre-existing code and delivering precise, line-level findings.
+- **Comprehensive OWASP rule set** — Covers SQL/command/LDAP injection, hardcoded secrets, insecure authentication patterns, path traversal, and unsafe deserialization.
+- **Multiple output formats** — Rich colorized terminal output, structured JSON for CI pipelines, and SARIF for GitHub Advanced Security and VS Code integration.
+- **Flexible input modes** — Works with staged changes, the latest commit, or arbitrary git ref ranges — covering pre-commit hooks through full CI pipelines.
+- **Zero heavy dependencies** — Only requires Python 3.9+ and `rich`. Fast to install, runs anywhere.
 
 ---
 
-## Pre-commit Hook Setup
+## Usage Examples
 
-vulndiff ships with a pre-commit hook definition. To use it:
+### Pre-commit hook (recommended)
 
-1. Install the [pre-commit](https://pre-commit.com/) framework:
-
-   ```bash
-   pip install pre-commit
-   ```
-
-2. Add vulndiff to your `.pre-commit-config.yaml`:
-
-   ```yaml
-   repos:
-     - repo: https://github.com/example/vulndiff
-       rev: v0.1.0
-       hooks:
-         - id: vulndiff
-   ```
-
-3. Install the hooks:
-
-   ```bash
-   pre-commit install
-   ```
-
-Now vulndiff will automatically scan your staged changes before every commit.
-
-### Custom arguments
+Add vulndiff to your `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
@@ -176,19 +58,29 @@ repos:
     rev: v0.1.0
     hooks:
       - id: vulndiff
+```
+
+Optionally set a minimum severity and output format:
+
+```yaml
+      - id: vulndiff
         args: ["--severity", "medium", "--format", "json"]
+```
+
+Install the hook:
+
+```bash
+pre-commit install
 ```
 
 ---
 
-## CI Integration
-
-### GitHub Actions
+### CI pipeline (GitHub Actions)
 
 ```yaml
 name: Security Scan
 
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
   vulndiff:
@@ -196,101 +88,128 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for ref range comparisons
+          fetch-depth: 0
 
       - name: Install vulndiff
         run: pip install vulndiff
 
-      - name: Scan diff (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          vulndiff \
-            --from-ref ${{ github.event.pull_request.base.sha }} \
-            --to-ref ${{ github.event.pull_request.head.sha }} \
-            --severity medium \
-            --fail-on-findings
+      - name: Scan diff
+        run: vulndiff --from-ref ${{ github.event.pull_request.base.sha }} --to-ref HEAD --format sarif --output results.sarif
 
-      - name: Scan last commit (push)
-        if: github.event_name == 'push'
-        run: vulndiff --head --severity medium --fail-on-findings
-```
-
-### GitHub Actions with SARIF upload
-
-```yaml
-      - name: Scan and generate SARIF
-        run: |
-          vulndiff \
-            --from-ref ${{ github.event.pull_request.base.sha }} \
-            --to-ref ${{ github.event.pull_request.head.sha }} \
-            --format sarif > vulndiff-results.sarif
-        continue-on-error: true
-
-      - name: Upload SARIF to GitHub
+      - name: Upload SARIF to GitHub Advanced Security
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: vulndiff-results.sarif
-```
-
-### GitLab CI
-
-```yaml
-vulndiff:
-  stage: test
-  image: python:3.11-slim
-  before_script:
-    - pip install vulndiff
-  script:
-    - vulndiff
-        --from-ref $CI_MERGE_REQUEST_TARGET_BRANCH_SHA
-        --to-ref $CI_COMMIT_SHA
-        --severity medium
-        --fail-on-findings
-  only:
-    - merge_requests
+          sarif_file: results.sarif
 ```
 
 ---
 
-## Rule Categories
-
-| Category | Examples |
-|---|---|
-| **SQL Injection** | Raw string formatting in SQL queries, `execute()` with f-strings |
-| **Command Injection** | `subprocess.call(shell=True)`, `os.system()` with variables |
-| **LDAP Injection** | Unsanitized LDAP filter construction |
-| **Path Traversal** | `open()` with user-supplied paths, `../` in filenames |
-| **Hardcoded Secrets** | API keys, passwords, tokens assigned as literals |
-| **Insecure Auth** | `verify=False` in requests, disabled SSL/TLS verification |
-| **Unsafe Deserialization** | `pickle.loads()`, `yaml.load()` without `Loader` |
-| **XSS** | `innerHTML` assignments, `dangerouslySetInnerHTML` |
-| **Insecure Randomness** | `random.random()` for security-sensitive values |
-| **Weak Cryptography** | MD5/SHA1 for password hashing, DES/RC4 cipher usage |
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|---|---|
-| `0` | No findings (or `--no-fail` mode) |
-| `1` | One or more findings at or above the severity threshold |
-| `2` | Tool error (invalid arguments, git not available, etc.) |
-
----
-
-## Development
+### CLI reference
 
 ```bash
-# Clone and set up
-git clone https://github.com/example/vulndiff.git
-cd vulndiff
-pip install -e ".[dev]"
+# Scan staged changes with default rich output
+vulndiff --staged
 
-# Run tests
+# Only report HIGH and CRITICAL findings
+vulndiff --staged --severity high
+
+# Output structured JSON
+vulndiff --head --format json
+
+# Output SARIF for VS Code / GitHub Advanced Security
+vulndiff --from-ref main --to-ref HEAD --format sarif --output results.sarif
+
+# List all available rules
+vulndiff --list-rules
+```
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No findings at or above the severity threshold |
+| `1`  | One or more findings detected |
+| `2`  | Error (not a git repo, invalid arguments, etc.) |
+
+---
+
+### Example terminal output
+
+```
+ vulndiff scan — 3 findings in 2 files
+
+  CRITICAL  app/db.py:47
+  Rule      SQL-001 · SQL Injection
+  Match     cursor.execute(f"SELECT * FROM users WHERE id={uid}")
+  Fix       Use parameterized queries or an ORM instead of string interpolation.
+
+  HIGH      app/auth.py:12
+  Rule      AUTH-003 · Hardcoded Secret
+  Match     SECRET_KEY = "hardcoded-secret-do-not-use"
+  Fix       Load secrets from environment variables or a secrets manager.
+
+  MEDIUM    app/files.py:23
+  Rule      PATH-001 · Path Traversal
+  Match     open(os.path.join(base_dir, user_input))
+  Fix       Validate and sanitize user-controlled path components.
+```
+
+---
+
+## Project Structure
+
+```
+vulndiff/
+├── pyproject.toml          # Project metadata, dependencies, CLI entry point
+├── .pre-commit-hooks.yaml  # Pre-commit framework hook definition
+├── README.md
+│
+├── vulndiff/
+│   ├── __init__.py         # Package init and version constant
+│   ├── cli.py              # Argparse CLI entry point
+│   ├── git_diff.py         # Git diff extraction (staged, HEAD, ref range)
+│   ├── scanner.py          # Rule engine — matches patterns against diff hunks
+│   ├── rules.py            # Vulnerability rule definitions (OWASP Top 10, etc.)
+│   ├── reporter.py         # Output formatters: rich, JSON, SARIF
+│   └── models.py           # Shared dataclasses: Rule, DiffHunk, Finding, ScanResult
+│
+└── tests/
+    ├── __init__.py
+    ├── test_models.py      # Data model construction and serialization tests
+    ├── test_rules.py       # Rule pattern compilation and payload matching
+    ├── test_git_diff.py    # Diff parsing — multi-file, multi-hunk, edge cases
+    ├── test_scanner.py     # Scanner engine with known-vulnerable snippets
+    ├── test_reporter.py    # JSON and SARIF output correctness
+    └── test_cli.py         # Argument parsing, exit codes, format dispatching
+```
+
+---
+
+## Configuration
+
+vulndiff is configured via CLI flags. There is no config file required.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--staged` | — | Scan staged changes (`git diff --cached`) |
+| `--head` | — | Scan the most recent commit (`HEAD~1..HEAD`) |
+| `--from-ref <ref>` | — | Start ref for a custom range |
+| `--to-ref <ref>` | `HEAD` | End ref for a custom range |
+| `--severity <level>` | `low` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
+| `--format <fmt>` | `rich` | Output format: `rich`, `json`, `sarif` |
+| `--output <file>` | stdout | Write output to a file instead of stdout |
+| `--list-rules` | — | Print all available rules and exit |
+| `--no-exit-code` | — | Always exit `0` (useful for informational scans) |
+
+---
+
+## Running Tests
+
+```bash
+pip install -e ".[dev]"
 pytest
 
-# Run tests with coverage
+# With coverage
 pytest --cov=vulndiff --cov-report=term-missing
 ```
 
@@ -299,3 +218,7 @@ pytest --cov=vulndiff --cov-report=term-missing
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+*Built with [Jitter](https://github.com/jitter-ai) — an AI agent that ships code daily.*
