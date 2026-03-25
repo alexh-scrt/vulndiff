@@ -1,0 +1,61 @@
+# Pre-commit hook definitions for vulndiff.
+#
+# To use vulndiff as a pre-commit hook, add the following to your
+# .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/example/vulndiff
+#       rev: v0.1.0
+#       hooks:
+#         - id: vulndiff
+#
+# You can also pass additional arguments, for example to set a minimum
+# severity level or choose the output format:
+#
+#   hooks:
+#     - id: vulndiff
+#       args: ["--severity", "medium", "--format", "json"]
+
+- id: vulndiff
+  name: vulndiff security scan
+  description: >-
+    Scans staged code changes for security vulnerabilities covering
+    OWASP Top 10, injection flaws, hardcoded secrets, and auth issues.
+  language: python
+  entry: vulndiff
+  args: ["--staged"]
+  types: []
+  types_or:
+    - python
+    - javascript
+    - typescript
+    - java
+    - go
+    - ruby
+    - php
+    - c
+    - c++
+    - yaml
+    - json
+    - toml
+    - bash
+    - shell
+  pass_filenames: false
+  always_run: false
+  require_serial: false
+  minimum_pre_commit_version: "2.9.0"
+
+- id: vulndiff-all
+  name: vulndiff security scan (all files)
+  description: >-
+    Scans all tracked file changes for security vulnerabilities. Use this
+    hook variant when you want vulndiff to run regardless of which file
+    types are staged.
+  language: python
+  entry: vulndiff
+  args: ["--staged"]
+  types: []
+  pass_filenames: false
+  always_run: true
+  require_serial: false
+  minimum_pre_commit_version: "2.9.0"
