@@ -8,7 +8,7 @@ functions are tested via monkeypatching.
 from __future__ import annotations
 
 from typing import List
- from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -95,7 +95,7 @@ index 1111111..2222222 100644
 @@ -1,1 +1,2 @@
  original
 +new_line
-\ No newline at end of file
+\\ No newline at end of file
 """
 
 EMPTY_DIFF = ""
@@ -318,7 +318,7 @@ class TestParseDiffText:
     def test_start_line_matches_hunk_header(self) -> None:
         """DiffHunk.start_line should match the new-file start in the @@ header."""
         hunks = parse_diff_text(SIMPLE_DIFF)
-        # @@ -10,3 +10,5 @@ → new-file start = 10
+        # @@ -10,3 +10,5 @@ -> new-file start = 10
         assert hunks[0].start_line == 10
 
     def test_single_line_hunk_no_count(self) -> None:
@@ -678,7 +678,7 @@ class TestEdgeCases:
         for i in range(1, 4):
             diff += (
                 f"diff --git a/file{i}.py b/file{i}.py\n"
-                f"index 000{i}..000{i+1} 100644\n"
+                f"index 000{i}..000{i + 1} 100644\n"
                 f"--- a/file{i}.py\n"
                 f"+++ b/file{i}.py\n"
                 f"@@ -1,1 +1,2 @@\n"
@@ -735,3 +735,57 @@ class TestEdgeCases:
         assert len(hunks) == 1
         contents = [line for _, line in hunks[0].added_lines]
         assert "+plus_content" in contents
+
+    def test_multiple_hunks_line_number_continuity(self) -> None:
+        """Line numbers in successive hunks should be independent and correct."""
+        hunks = parse_diff_text(MULTI_HUNK_DIFF)
+        assert len(hunks) == 2
+        # First hunk starts at line 5 in new file, context on line 5 -> adds at 6, 7
+        first_lines = [ln for ln, _ in hunks[0].added_lines]
+        assert first_lines[0] >= 1
+        # Second hunk starts at line 21, context on 21 -> add at 22
+        second_lines = [ln for ln, _ in hunks[1].added_lines]
+        assert second_lines[0] >= 1
+        # The two hunks must not share line numbers (they're in different regions)
+        assert set(first_lines).isdisjoint(set(second_lines))
+
+    def test_diff_with_no_context_lines(self) -> None:
+        """A diff produced with --unified=0 has no context lines."""
+        diff = (
+            "diff --git a/nocontext.py b/nocontext.py\n"
+            "index abc..def 100644\n"
+            "--- a/nocontext.py\n"
+            "+++ b/nocontext.py\n"
+            "@@ -5,0 +6,2 @@\n"
+            "+inserted_1\n"
+            "+inserted_2\n"
+        )
+        hunks = parse_diff_text(diff)
+        assert len(hunks) == 1
+        assert hunks[0].line_count == 2
+        line_numbers = [ln for ln, _ in hunks[0].added_lines]
+        assert line_numbers == [6, 7]
+
+    def test_file_with_spaces_in_name(self) -> None:
+        """File paths containing spaces should be captured correctly."""
+        diff = (
+            "diff --git a/my file.py b/my file.py\n"
+            "index abc..def 100644\n"
+            "--- a/my file.py\n"
+            "+++ b/my file.py\n"
+            "@@ -1,1 +1,2 @@\n"
+            " original\n"
+            "+added\n"
+        )
+        hunks = parse_diff_text(diff)
+        assert len(hunks) == 1
+        assert hunks[0].file_path == "my file.py"
+
+    def test_parse_returns_empty_for_diff_header_only(self) -> None:
+        """A diff with only the file header and no hunks should return empty."""
+        diff = (
+            "diff --git a/headeronly.py b/headeronly.py\n"
+            "index abc..def 100644\n"
+        )
+        hunks = parse_diff_text(diff)
+        assert hunks == []

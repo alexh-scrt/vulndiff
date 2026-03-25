@@ -296,6 +296,35 @@ class TestScanStatistics:
         result = scan(hunks=[], rules=[], severity_filter=Severity.HIGH)
         assert result.severity_filter == Severity.HIGH
 
+    def test_empty_hunk_contributes_zero_lines(self) -> None:
+        """An empty hunk should contribute 0 to scanned_lines."""
+        hunk = DiffHunk(file_path="empty.py", start_line=1, added_lines=[])
+        result = scan(hunks=[hunk], rules=[])
+        assert result.scanned_lines == 0
+
+    def test_empty_hunk_still_counted_in_hunks(self) -> None:
+        """An empty hunk itself is counted in scanned_hunks."""
+        hunk = DiffHunk(file_path="empty.py", start_line=1, added_lines=[])
+        result = scan(hunks=[hunk], rules=[])
+        assert result.scanned_hunks == 1
+
+    def test_scanned_files_includes_file_from_empty_hunk(self) -> None:
+        """A file from an empty hunk should still appear in scanned_files."""
+        hunk = DiffHunk(file_path="empty.py", start_line=1, added_lines=[])
+        result = scan(hunks=[hunk], rules=[])
+        assert "empty.py" in result.scanned_files
+
+    def test_severity_summary_reflects_findings(self) -> None:
+        """severity_summary() should tally findings correctly."""
+        crit_rule = make_rule(rule_id="VD901", severity=Severity.CRITICAL, pattern=r"CRIT")
+        high_rule = make_rule(rule_id="VD902", severity=Severity.HIGH, pattern=r"HIGH")
+        hunk = make_hunk(lines=["CRIT code", "HIGH code", "CRIT again"])
+        result = scan(hunks=[hunk], rules=[crit_rule, high_rule])
+        summary = result.severity_summary()
+        assert summary["critical"] == 2
+        assert summary["high"] == 1
+        assert summary["medium"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Findings ordering
@@ -325,6 +354,15 @@ class TestFindingsOrdering:
         result = scan(hunks=[hunk], rules=[rule])
         line_nums = [f.line_number for f in result.findings]
         assert line_nums == sorted(line_nums)
+
+    def test_findings_sorted_by_rule_id_for_same_file_line(self) -> None:
+        """When file and line are the same, findings should be sorted by rule_id."""
+        rule_b = make_rule(rule_id="VD902", pattern=r"MATCH")
+        rule_a = make_rule(rule_id="VD901", pattern=r"MATCH")
+        hunk = make_hunk(file_path="x.py", start_line=1, lines=["MATCH"])
+        result = scan(hunks=[hunk], rules=[rule_b, rule_a])
+        rule_ids = [f.rule_id for f in result.findings]
+        assert rule_ids == sorted(rule_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +397,24 @@ class TestMultiHunkMultiFile:
         result = scan(hunks=[hunk], rules=[])
         assert result.scanned_lines == 0
         assert result.scanned_hunks == 1  # hunk itself is counted
+
+    def test_mixed_empty_and_non_empty_hunks(self) -> None:
+        """Mix of empty and non-empty hunks: only non-empty lines contribute."""
+        rule = make_rule(pattern=r"BAD")
+        empty_hunk = DiffHunk(file_path="empty.py", start_line=1, added_lines=[])
+        full_hunk = make_hunk(file_path="full.py", lines=["BAD code", "more code"])
+        result = scan(hunks=[empty_hunk, full_hunk], rules=[rule])
+        assert result.scanned_lines == 2
+        assert result.scanned_hunks == 2
+        assert result.finding_count == 1
+
+    def test_no_cross_file_deduplication(self) -> None:
+        """The same pattern on the same line number in two files = two findings."""
+        rule = make_rule(pattern=r"BAD")
+        hunk_a = make_hunk(file_path="a.py", start_line=10, lines=["BAD"])
+        hunk_b = make_hunk(file_path="b.py", start_line=10, lines=["BAD"])
+        result = scan(hunks=[hunk_a, hunk_b], rules=[rule])
+        assert result.finding_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +477,7 @@ class TestScanWithRealRules:
         assert result.finding_count == 1
 
     def test_full_rule_set_clean_code(self) -> None:
-        """A hunk with safe code should produce no findings with the full rule set."""
+        """A hunk with safe code should not crash the scanner with the full rule set."""
         rules = get_all_rules()
         hunk = make_hunk(
             file_path="safe.py",
@@ -432,8 +488,7 @@ class TestScanWithRealRules:
             ],
         )
         result = scan(hunks=[hunk], rules=rules)
-        # We can't guarantee zero findings for all rules on all safe lines,
-        # but this verifies the scanner runs without errors.
+        # Verify the scanner runs without errors and returns a ScanResult
         assert isinstance(result, ScanResult)
 
     def test_multiple_vulnerabilities_in_one_hunk(self) -> None:
@@ -454,6 +509,77 @@ class TestScanWithRealRules:
         rule_ids = {f.rule_id for f in result.findings}
         assert "VD060" in rule_ids
         assert "VD011" in rule_ids
+
+    def test_yaml_load_without_loader_detected(self) -> None:
+        """VD061 should trigger on yaml.load() without a safe loader."""
+        rule = get_rule_by_id("VD061")
+        hunk = make_hunk(
+            file_path="config_loader.py",
+            lines=["    data = yaml.load(stream)"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.finding_count == 1
+
+    def test_eval_variable_detected(self) -> None:
+        """VD013 should trigger on eval() with a variable argument."""
+        rule = get_rule_by_id("VD013")
+        hunk = make_hunk(
+            file_path="dynamic.py",
+            lines=["    result = eval(user_code)"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.finding_count == 1
+
+    def test_debug_true_detected(self) -> None:
+        """VD054 should trigger on DEBUG = True."""
+        rule = get_rule_by_id("VD054")
+        hunk = make_hunk(
+            file_path="settings.py",
+            lines=["DEBUG = True"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.finding_count == 1
+
+    def test_hashlib_md5_detected(self) -> None:
+        """VD090 should trigger on hashlib.md5() usage."""
+        rule = get_rule_by_id("VD090")
+        hunk = make_hunk(
+            file_path="crypto_utils.py",
+            lines=["    digest = hashlib.md5(data).hexdigest()"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.finding_count == 1
+
+    def test_private_key_header_detected(self) -> None:
+        """VD043 should trigger on a PEM private key header."""
+        rule = get_rule_by_id("VD043")
+        hunk = make_hunk(
+            file_path="certs.py",
+            lines=["    key = '-----BEGIN RSA PRIVATE KEY-----'"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.finding_count == 1
+
+    def test_finding_file_path_stored_correctly(self) -> None:
+        """Finding file_path should match the hunk's file_path exactly."""
+        rule = get_rule_by_id("VD060")
+        hunk = make_hunk(
+            file_path="deeply/nested/module.py",
+            lines=["    obj = pickle.loads(data)"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.findings[0].file_path == "deeply/nested/module.py"
+
+    def test_finding_line_number_accurate(self) -> None:
+        """Finding line_number should reflect the actual position in the new file."""
+        rule = get_rule_by_id("VD060")
+        hunk = make_hunk(
+            file_path="utils.py",
+            start_line=100,
+            lines=["safe line", "also safe", "    obj = pickle.loads(data)"],
+        )
+        result = scan(hunks=[hunk], rules=[rule])
+        assert result.findings[0].line_number == 102
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +636,12 @@ class TestScanText:
         with pytest.raises(ValueError, match="start_line"):
             scan_text("BAD", "foo.py", rules=[rule], start_line=0)
 
+    def test_start_line_negative_raises(self) -> None:
+        """A negative start_line should raise ValueError."""
+        rule = make_rule(pattern=r"BAD")
+        with pytest.raises(ValueError, match="start_line"):
+            scan_text("BAD", "foo.py", rules=[rule], start_line=-5)
+
     def test_severity_filter_applied(self) -> None:
         """scan_text() should apply the severity_filter."""
         low_rule = make_rule(rule_id="VD901", severity=Severity.LOW, pattern=r"LOWBAD")
@@ -517,3 +649,48 @@ class TestScanText:
             "LOWBAD", "foo.py", rules=[low_rule], severity_filter=Severity.HIGH
         )
         assert findings == []
+
+    def test_multiple_matching_lines(self) -> None:
+        """scan_text() should find all matching lines in multi-line text."""
+        rule = make_rule(pattern=r"BAD")
+        text = "BAD line 1\nok line\nBAD line 3"
+        findings = scan_text(text, "foo.py", rules=[rule], start_line=1)
+        assert len(findings) == 2
+        line_numbers = [f.line_number for f in findings]
+        assert 1 in line_numbers
+        assert 3 in line_numbers
+
+    def test_whitespace_only_file_path_raises(self) -> None:
+        """A whitespace-only file_path should raise ValueError."""
+        rule = make_rule(pattern=r"BAD")
+        with pytest.raises(ValueError, match="file_path"):
+            scan_text("BAD", "   ", rules=[rule])
+
+    def test_no_rules_returns_empty(self) -> None:
+        """With no rules, scan_text() should return an empty list."""
+        findings = scan_text("pickle.loads(data)", "foo.py", rules=[])
+        assert findings == []
+
+    def test_finding_has_correct_match_text(self) -> None:
+        """scan_text() findings should have the correct match_text substring."""
+        rule = make_rule(pattern=r"unsafe_call\(")
+        findings = scan_text("    unsafe_call(x)", "foo.py", rules=[rule])
+        assert len(findings) == 1
+        assert findings[0].match_text == "unsafe_call("
+
+    def test_finding_line_content_preserved(self) -> None:
+        """scan_text() findings should preserve the original line content."""
+        rule = make_rule(pattern=r"BAD")
+        findings = scan_text("  BAD code here  ", "foo.py", rules=[rule])
+        assert findings[0].line_content == "  BAD code here  "
+
+    def test_real_rule_via_scan_text(self) -> None:
+        """scan_text() should work with a real rule from the rule set."""
+        rule = get_rule_by_id("VD060")
+        findings = scan_text(
+            "    obj = pickle.loads(data)",
+            "utils.py",
+            rules=[rule],
+        )
+        assert len(findings) == 1
+        assert findings[0].rule_id == "VD060"
